@@ -30,12 +30,12 @@ git init
 git add .
 git commit -m "Bola Ocho"
 git branch -M main
-git remote add origin https://github.com/USUARIO/bola-ocho.git
+git remote add origin https://github.com/AngelUre7a/pool.git
 git push -u origin main
 ```
 
 Después, en el repo: **Settings → Pages → Source: Deploy from a branch → main / (root)**.
-En un par de minutos queda en `https://USUARIO.github.io/bola-ocho/`.
+En un par de minutos queda en `https://AngelUre7a.github.io/pool/`.
 
 ## Cómo viaja la partida
 
