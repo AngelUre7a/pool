@@ -119,11 +119,19 @@ h1 .eight{color:var(--accent)}
 .pip .num{position:relative; z-index:1}
 .pip.gone{opacity:.18}
 .turn-pill{
-  display:grid; place-items:center; padding:0 14px; min-width:78px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  padding:6px 14px; min-width:84px;
   background:var(--panel-2); border:1px solid var(--line); border-radius:5px;
   font-family:"Barlow Condensed",sans-serif; font-weight:600; text-transform:uppercase;
   letter-spacing:.12em; font-size:12px; color:var(--muted); text-align:center; line-height:1.25;
 }
+.turn-clock{
+  font-family:"Big Shoulders Display",sans-serif; font-weight:700; font-size:24px;
+  line-height:1; letter-spacing:.02em; color:var(--text);
+  font-variant-numeric:tabular-nums; min-height:0;
+}
+.turn-clock:empty{display:none}
+.turn-clock.low{color:var(--bad)}
 
 .stage{position:relative; border-radius:8px; overflow:hidden; box-shadow:var(--shadow); background:var(--rail-lo)}
 canvas{display:block; width:100%; height:auto; touch-action:none; cursor:crosshair}
@@ -172,6 +180,16 @@ input[type=text]:focus-visible{outline:2px solid var(--accent); outline-offset:1
 .btn.primary:hover:not(:disabled){filter:brightness(1.08); color:#fff}
 .row{display:flex; gap:8px}
 .row>*{flex:1}
+.seg{display:flex; gap:4px}
+.seg-b{
+  flex:1; font-family:"Barlow Condensed",sans-serif; font-weight:600; font-size:13px;
+  text-transform:uppercase; letter-spacing:.07em; white-space:nowrap;
+  padding:8px 4px; border-radius:4px; border:1px solid var(--line);
+  background:var(--panel-2); color:var(--muted); cursor:pointer;
+}
+.seg-b:hover{color:var(--text); border-color:var(--accent)}
+.seg-b:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.seg-b.on{background:var(--accent); border-color:var(--accent); color:#fff}
 .divider{
   display:flex; align-items:center; gap:10px; color:var(--muted);
   font-family:"Barlow Condensed",sans-serif; font-size:11.5px;
@@ -287,15 +305,16 @@ input[type=text]:focus-visible{outline:2px solid var(--accent); outline-offset:1
       <span class="pct" id="powerPct">45%</span>
       <input type="range" id="powerRange" min="5" max="100" value="45" aria-label="Fuerza del tiro" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
     </div>
-    <div class="hint" id="hint">Arrastr&aacute; hacia atr&aacute;s desde la blanca para tirar</div>
+    <div class="hint" id="hint">Manten&eacute; apretado y estir&aacute; el taco hacia atr&aacute;s</div>
   </div>
 
   <p class="status" id="status"><span class="dot"></span><span id="statusText">Eleg&iacute; c&oacute;mo quer&eacute;s jugar.</span></p>
 
   <div class="legend">
-    <span><b>Teclado:</b> flechas para apuntar y dosificar &middot; espacio tira</span>
-    <span><b>Falta:</b> bola en mano donde sea</span>
-    <span><b>La 8:</b> de &uacute;ltimo, sin cantar tronera</span>
+    <span><b>Tirar:</b> estir&aacute; el taco; mientras lo ten&eacute;s agarrado segu&iacute;s corrigiendo &aacute;ngulo y fuerza</span>
+    <span><b>Cancelar:</b> solt&aacute; con el taco sin estirar</span>
+    <span><b>Teclado:</b> flechas &middot; espacio tira</span>
+    <span><b>Sin tiempo:</b> falta y bola en mano</span>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
@@ -361,7 +380,7 @@ function makeRack(seed){
   return balls;
 }
 
-function freshState(seed){
+function freshState(seed, clock){
   return {
     balls: makeRack(seed),
     turn: "p1",
@@ -369,6 +388,7 @@ function freshState(seed){
     ballInHand: false,
     broke: false,
     winner: null,
+    clock: (typeof clock === "number") ? clock : 30,   /* segundos por tirada; 0 = sin limite */
     message: "Saque libre. La blanca va desde la cocina.",
     tone: ""
   };
@@ -914,9 +934,17 @@ var App = {
   placing: false,
   charging: false,
   downPt: null,
-  touchDrag: false,
+  grab: null,
+  pullDist: 0,
+  clockChoice: 30,
+  turnEndsAt: 0,
+  clockShown: -1,
   peers: []
 };
+
+/* El taco descansa a PULL_REST de la blanca y se puede estirar
+   PULL_SPAN mas atras; esa distancia es la fuerza. */
+var PULL_REST = 4, PULL_SPAN = 34, PULL_CANCEL = 6;
 
 /* Firma barata del estado para detectar una desincronización real
    sin pisar lo que el jugador ya movió en su pantalla. */
@@ -935,6 +963,8 @@ try {
     localStorage.setItem("bo.cid", App.clientId);
   }
   App.myName = localStorage.getItem("bo.name") || "";
+  var savedClock = localStorage.getItem("bo.clock");
+  if (savedClock !== null) App.clockChoice = parseInt(savedClock, 10) || 0;
 } catch(e){
   App.clientId = Math.random().toString(36).slice(2, 12);
 }
@@ -1004,9 +1034,10 @@ function renderScore(){
   } else {
     var who = App.names[st.turn];
     var mine = (App.mode === "local") || (App.seat === st.turn);
-    $("turnPill").innerHTML = mine
-      ? "Te toca<br>a vos"
-      : "Tira<br>" + esc(who.split(" ")[0]);
+    $("turnPill").innerHTML =
+      '<span class="turn-who">' + (mine ? "Te toca<br>a vos" : "Tira<br>" + esc(who.split(" ")[0])) + '</span>' +
+      '<span class="turn-clock" id="turnClock"></span>';
+    renderClock();
   }
 }
 
@@ -1038,7 +1069,13 @@ function updateHint(){
   if (App.sim){ $("hint").textContent = "Bolas en movimiento…"; return; }
   if (!myTurn()){ $("hint").textContent = "Esperando el tiro del rival"; return; }
   if (st.ballInHand && App.placing){ $("hint").textContent = "Bola en mano: hacé clic para colocar la blanca"; return; }
-  $("hint").textContent = "Arrastrá hacia atrás desde la blanca para tirar";
+  if (App.charging){
+    $("hint").textContent = App.pullDist < PULL_CANCEL
+      ? "Estirá el taco para cargar · soltá así para cancelar"
+      : "Seguí moviendo: corregís ángulo y fuerza · soltá para tirar";
+    return;
+  }
+  $("hint").textContent = "Mantené apretado y estirá el taco hacia atrás";
 }
 
 /* ============================================================
@@ -1060,6 +1097,7 @@ function frame(ts){
     if (App.sim.done) finishShot();
   }
   App.last = ts;
+  tickClock();
 
   var cue = findBall(App.state.balls, 0);
   var aim = null;
@@ -1068,7 +1106,7 @@ function frame(ts){
       show: myTurn() && !App.state.winner && cue["in"] && !App.placing,
       cue: true,
       ang: App.aim.ang,
-      pull: (App.charging ? App.power/100 * 11 : 1.2),
+      pull: (App.charging ? (App.pullDist - PULL_REST) : 1.2),
       cx: cue.x, cy: cue.y,
       ghost: App.placing ? App.aim.ghost : null,
       ghostOk: App.aim.ghostOk,
@@ -1126,8 +1164,60 @@ function finishShot(){
   afterState();
 }
 
+/* ---- reloj de tirada ---- */
+function clockOn(){
+  var st = App.state;
+  return !!(st && st.clock && !st.winner && !App.sim);
+}
+function restartClock(){
+  var st = App.state;
+  App.clockShown = -1;
+  App.turnEndsAt = (st && st.clock && !st.winner) ? (Date.now() + st.clock * 1000) : 0;
+}
+function clockLeft(){
+  if (!App.turnEndsAt) return 0;
+  return Math.max(0, Math.ceil((App.turnEndsAt - Date.now()) / 1000));
+}
+function tickClock(){
+  if (!clockOn()){
+    if (App.clockShown !== -1){ App.clockShown = -1; renderClock(); }
+    return;
+  }
+  var left = clockLeft();
+  if (left !== App.clockShown){
+    App.clockShown = left;
+    renderClock();
+  }
+  if (left <= 0 && myTurn()) timeoutFoul();
+}
+function renderClock(){
+  var el = $("turnClock");
+  if (!el) return;
+  if (!clockOn()){ el.textContent = ""; el.className = "turn-clock"; return; }
+  var left = App.clockShown < 0 ? clockLeft() : App.clockShown;
+  el.textContent = left + "s";
+  el.className = "turn-clock" + (left <= 10 ? " low" : "");
+}
+function timeoutFoul(){
+  var st = App.state;
+  if (!st || st.winner) return;
+  App.turnEndsAt = 0;
+  st.turn = other(st.turn);
+  st.ballInHand = true;
+  st.message = "Se acabó el tiempo. Bola en mano para el rival.";
+  st.tone = "foul";
+  if (App.mode === "online" && App.seat){
+    App.seq++;
+    App.seenSeq = App.seq;
+    App.appliedStateSeq = App.seq;
+    netSend({t:"state", stateSeq: App.seq, state: st});
+  }
+  afterState();
+}
+
 function afterState(){
   var st = App.state;
+  restartClock();
   renderScore();
   setStatus(st.message || "", st.tone || "");
   App.placing = !!st.ballInHand && myTurn();
@@ -1158,17 +1248,17 @@ cv.addEventListener("pointermove", function(e){
   }
   if (!myTurn()) return;
   if (App.charging){
-    if (App.touchDrag){
-      /* en pantalla táctil el ángulo ya quedó fijo al tocar:
-         la distancia arrastrada, en cualquier dirección, es la fuerza */
-      var ddx = pt.x - App.downPt.x, ddy = pt.y - App.downPt.y;
-      setPower((Math.sqrt(ddx*ddx + ddy*ddy) / 26) * 100);
-    } else {
-      var cue = findBall(App.state.balls, 0);
-      var dx = pt.x - cue.x, dy = pt.y - cue.y;
-      var back = -(dx * Math.cos(App.aim.ang) + dy * Math.sin(App.aim.ang));
-      setPower((back / 34) * 100);
-    }
+    /* el puntero lleva la culata del taco: al moverla cambian a la vez
+       la direccion del tiro y cuanto esta estirado el brazo */
+    var cue = findBall(App.state.balls, 0);
+    var gx = App.grab.x + (pt.x - App.downPt.x);
+    var gy = App.grab.y + (pt.y - App.downPt.y);
+    var dx = cue.x - gx, dy = cue.y - gy;
+    var d = Math.sqrt(dx*dx + dy*dy);
+    if (d > 0.6) App.aim.ang = Math.atan2(dy, dx);
+    App.pullDist = Math.max(PULL_REST, Math.min(PULL_REST + PULL_SPAN, d));
+    setPower(((App.pullDist - PULL_REST) / PULL_SPAN) * 100);
+    updateHint();
   } else {
     App.aim.ang = pointerAngle(pt);
   }
@@ -1192,11 +1282,17 @@ cv.addEventListener("pointerdown", function(e){
     }
     return;
   }
-  App.touchDrag = (e.pointerType === "touch" || e.pointerType === "pen");
-  if (App.touchDrag) App.aim.ang = pointerAngle(pt);
+  if (e.pointerType === "touch" || e.pointerType === "pen") App.aim.ang = pointerAngle(pt);
+  var cue0 = findBall(App.state.balls, 0);
   App.downPt = pt;
+  App.grab = {
+    x: cue0.x - Math.cos(App.aim.ang) * PULL_REST,
+    y: cue0.y - Math.sin(App.aim.ang) * PULL_REST
+  };
+  App.pullDist = PULL_REST;
   App.charging = true;
-  setPower(App.power);
+  setPower(0);
+  updateHint();
   sendPresence();
 });
 
@@ -1204,6 +1300,12 @@ function releaseShot(){
   if (!App.charging) return;
   App.charging = false;
   if (!myTurn()) return;
+  if (App.pullDist < PULL_CANCEL){
+    /* apenas se movio el taco: el tiro se cancela, nadie pierde el turno */
+    setStatus("Tiro cancelado. Volvé a apuntar.", "");
+    updateHint();
+    return;
+  }
   var cue = findBall(App.state.balls, 0);
   App.lastShooter = App.mode === "local" ? App.state.turn : App.seat;
   beginShot(App.aim.ang, App.power, cue.x, cue.y, true);
@@ -1445,7 +1547,7 @@ function hostTable(attempt){
   App.code = code;
   App.names.p1 = App.myName || "Anfitrión";
   App.names.p2 = "Esperando…";
-  App.state = freshState(code);
+  App.state = freshState(code, App.clockChoice);
   App.seq = 0; App.seenSeq = 0; App.appliedStateSeq = 0;
   App.waiting = true;
 
@@ -1568,6 +1670,39 @@ function saveName(){
   try { if (App.myName) localStorage.setItem("bo.name", App.myName); } catch(e){}
 }
 
+var CLOCK_OPTS = [
+  {v: 20, t: "20 s"},
+  {v: 30, t: "30 s"},
+  {v: 60, t: "60 s"},
+  {v: 0,  t: "Sin l&iacute;mite"}
+];
+
+function clockPicker(){
+  return '<div class="field">' +
+    '<label>Tiempo por tirada</label>' +
+    '<div class="seg" id="clockSeg">' +
+      CLOCK_OPTS.map(function(o){
+        return '<button type="button" class="seg-b' + (o.v === App.clockChoice ? " on" : "") +
+               '" data-v="' + o.v + '">' + o.t + '</button>';
+      }).join("") +
+    '</div>' +
+  '</div>';
+}
+
+function wireClockPicker(){
+  var seg = $("clockSeg");
+  if (!seg) return;
+  Array.prototype.forEach.call(seg.querySelectorAll(".seg-b"), function(b){
+    b.addEventListener("click", function(){
+      App.clockChoice = parseInt(b.getAttribute("data-v"), 10) || 0;
+      try { localStorage.setItem("bo.clock", String(App.clockChoice)); } catch(e){}
+      Array.prototype.forEach.call(seg.querySelectorAll(".seg-b"), function(x){
+        x.classList.toggle("on", x === b);
+      });
+    });
+  });
+}
+
 function screenChoose(){
   var pending = hashCode();
   var joinBlock = pending
@@ -1579,6 +1714,7 @@ function screenChoose(){
       '<label for="myName">Tu nombre</label>' +
       '<input type="text" id="myName" maxlength="14" placeholder="Como te dicen" value="' + esc(App.myName) + '">' +
     '</div>' +
+    (pending ? '' : clockPicker()) +
     joinBlock +
     (pending ? '' :
       '<div class="divider">o entr&aacute; a una</div>' +
@@ -1595,6 +1731,7 @@ function screenChoose(){
 
   var nameInput = $("myName");
   nameInput.addEventListener("input", function(){ App.myName = nameInput.value.trim(); });
+  wireClockPicker();
 
   function takeName(fallback){
     App.myName = (nameInput.value || "").trim() || fallback;
@@ -1653,7 +1790,7 @@ function startLocal(){
   App.mode = "local";
   App.seat = null;
   App.names = {p1: App.myName || "Jugador 1", p2: "Rival"};
-  App.state = freshState("local-" + Date.now());
+  App.state = freshState("local-" + Date.now(), App.clockChoice);
   App.seq = 0; App.seenSeq = 0; App.appliedStateSeq = 0;
   if (location.hash){
     try { history.replaceState(null, "", location.pathname); } catch(e){}
@@ -1686,11 +1823,11 @@ function showWinner(){
   }
   ab.addEventListener("click", function(){
     if (App.mode === "local"){
-      App.state = freshState("local-" + Date.now());
+      App.state = freshState("local-" + Date.now(), App.clockChoice);
       hideOverlay(); afterState();
       return;
     }
-    var st2 = freshState(App.code + "-" + Date.now());
+    var st2 = freshState(App.code + "-" + Date.now(), App.state ? App.state.clock : App.clockChoice);
     App.seq++;
     App.seenSeq = App.seq;
     App.appliedStateSeq = App.seq;

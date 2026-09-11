@@ -10,9 +10,13 @@ sin dependencias que instalar y sin servidor propio.
   computadoras se conectan **directo entre ellas** por WebRTC.
 - **Misma pantalla**: se turnan el mouse. No necesita internet más allá de cargar la página.
 
-Apuntás moviendo el mouse, arrastrás hacia atrás desde la blanca para cargar
-fuerza y soltás. En celular: tocás para apuntar y arrastrás para cargar.
-Con teclado: flechas para apuntar y dosificar, espacio para tirar.
+Apuntás moviendo el mouse. Para tirar, mantenés apretado y estirás el taco
+hacia atrás: mientras lo tenés agarrado seguís corrigiendo **el ángulo y la
+fuerza a la vez**, y si soltás con el taco sin estirar el tiro se cancela sin
+perder el turno. Con teclado: flechas para apuntar y dosificar, espacio para tirar.
+
+Cada tirada tiene tiempo (20, 30, 60 segundos o sin límite, se elige al armar
+la mesa). Si se acaba, es falta y el rival recibe bola en mano.
 
 ## Reglas implementadas
 
